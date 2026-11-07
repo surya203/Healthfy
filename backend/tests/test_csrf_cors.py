@@ -96,6 +96,7 @@ def test_production_cookie_is_secure_and_host_only() -> None:
         _env_file=None,
         app_env="production",
         session_cookie_secure=True,
+        database_url="postgresql+psycopg://placeholder:placeholder@localhost/db?sslmode=require",
         session_cookie_name="healthify_session",
         session_ttl_seconds=604800,
     )

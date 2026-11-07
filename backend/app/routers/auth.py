@@ -46,7 +46,11 @@ def login(
         db,
         payload.email,
         payload.password,
-        client_ip(request, trust_x_forwarded_for=settings.trust_x_forwarded_for),
+        client_ip(
+            request,
+            trust_x_forwarded_for=settings.trust_x_forwarded_for,
+            trusted_proxy_mode=settings.trusted_proxy_mode,
+        ),
         settings,
     )
     response = JSONResponse(status_code=200, content={"user": serialize_user(user)})

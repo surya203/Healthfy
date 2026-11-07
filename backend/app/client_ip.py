@@ -10,8 +10,15 @@ from __future__ import annotations
 
 from starlette.requests import Request
 
+from app.errors import APIError
 
-def client_ip(request: Request, *, trust_x_forwarded_for: bool) -> str:
+
+def client_ip(request: Request, *, trust_x_forwarded_for: bool, trusted_proxy_mode: bool = False) -> str:
+    if trusted_proxy_mode:
+        verified = getattr(request.state, "verified_client_ip", None)
+        if not isinstance(verified, str) or not verified:
+            raise APIError(403, "FORBIDDEN", "Proxy authentication is required.")
+        return verified
     if trust_x_forwarded_for:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:

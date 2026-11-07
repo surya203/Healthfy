@@ -26,6 +26,8 @@ def get_engine() -> Engine:
             settings.database_url,
             echo=False,
             pool_pre_ping=True,
+            # Neon suspends idle computes. Recycle before a suspended connection is reused.
+            pool_recycle=300,
             connect_args={"options": "-c timezone=utc"},
         )
         _session_factory = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)

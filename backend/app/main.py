@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.csrf import OriginGuardMiddleware
 from app.errors import register_exception_handlers
+from app.proxy_auth import TrustedProxyMiddleware
 from app.routers.auth import router as auth_router
 
 logger = logging.getLogger("healthify")
@@ -32,6 +33,11 @@ def create_app() -> FastAPI:
 
     app.add_middleware(OriginGuardMiddleware, allowed_origins=settings.cors_origin_list)
     app.add_middleware(
+        TrustedProxyMiddleware,
+        enabled=settings.trusted_proxy_mode,
+        secret=settings.trusted_proxy_secret,
+    )
+    app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origin_list),
         allow_credentials=True,
@@ -41,7 +47,7 @@ def create_app() -> FastAPI:
     )
     logger.info(
         "Starting Healthify API env=%s cookie=%s secure=%s cors=%s "
-        "session_ttl_seconds=%s rate_limit=%s/%ss trust_x_forwarded_for=%s",
+        "session_ttl_seconds=%s rate_limit=%s/%ss trust_x_forwarded_for=%s trusted_proxy_mode=%s",
         settings.app_env,
         settings.session_cookie_name,
         settings.session_cookie_secure,
@@ -50,6 +56,7 @@ def create_app() -> FastAPI:
         settings.login_rate_limit_max_failures,
         settings.login_rate_limit_window_seconds,
         settings.trust_x_forwarded_for,
+        settings.trusted_proxy_mode,
     )
     return app
 
