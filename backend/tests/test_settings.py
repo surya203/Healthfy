@@ -27,9 +27,7 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_contract_defaults(isolated_env: None) -> None:
     settings = Settings(_env_file=None)
     assert settings.app_env == "development"
-    assert settings.database_url == (
-        "postgresql+psycopg://healthify:healthify@localhost:5432/healthify"
-    )
+    assert settings.database_url == ("postgresql+psycopg://healthify:healthify@localhost:5432/healthify")
     assert settings.cors_origin_list == ["http://localhost:5173"]
     assert settings.session_cookie_name == "healthify_session"
     assert settings.session_ttl_seconds == 604800

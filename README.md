@@ -2,9 +2,7 @@
 
 Healthify API and web scaffold (GitHub repository: Healthfy).
 
-**Bootstrap status:** this commit freezes the scaffold, local defaults, and the normative auth contract below. Registration, sessions, migrations, and the PostgreSQL test suite land in the following commits on this branch. Paths, status codes, cookie attributes, and error bodies in this document are the contract frontend and QA should build against.
-
-The frontend in `frontend/` is only a Vite + React + TypeScript shell. Feature UI is owned separately. The backend in `backend/` is FastAPI. PostgreSQL is the system of record.
+This repository implements the registration and session API below. The frontend in `frontend/` is only a Vite + React + TypeScript shell. Feature UI is owned separately. The backend in `backend/` is FastAPI. PostgreSQL is the system of record.
 
 ## Local ports
 
@@ -231,7 +229,8 @@ Policy:
 - A counted failure is an authentication failure after the body passed validation: unknown email or wrong password. Each one inserts one row and returns **401** `INVALID_CREDENTIALS`.
 - The first 5 failed attempts inside the window return **401**.
 - If 5 failures for that IP are already inside the window, the next attempt returns **429** and does not check the password and does not insert another row. A burst of blocked requests cannot extend the window.
-- `Retry-After` is the whole seconds until enough of the oldest failures leave the window for the count to drop below 5. With the default of 5, that is when the oldest stored failure ages out. The value is at least 1.
+- A failure counts while `now < attempted_at + window`. It drops out at that exact boundary (`attempted_at <= now - window`).
+- `Retry-After` is the whole seconds until enough of the oldest failures leave the window for the count to drop below 5. With the default of 5, that is when the oldest stored failure reaches `attempted_at + 900 seconds`. The value is at least 1.
 - A **successful login does not delete or reset** that IP's failure rows. Logging into an account does not clear the bucket.
 - `422` validation errors and `403` origin failures do not add rows.
 - Registration is not covered by this limiter.
@@ -250,7 +249,7 @@ The header is listed in `Access-Control-Expose-Headers` so page JavaScript can r
 
 Client IP is `request.client.host` (the immediate TCP peer). `X-Forwarded-For` is ignored unless `TRUST_X_FORWARDED_FOR=true`. When that flag is true, the **rightmost** hop is used, which is only correct behind one proxy that appends the peer address. If the flag is on and the client connects directly, the client can supply that value. Leave the flag false unless a trusted proxy is actually in front of the process.
 
-Rows older than the window are deleted during a login attempt. There is no public endpoint to seed or clear this table.
+Rows for that IP older than the window are deleted during a login attempt for that IP. There is no public endpoint to seed or clear this table.
 
 ## Session cookie
 
@@ -463,7 +462,12 @@ Migrations are Alembic revisions under `backend/alembic/versions`. Apply them wi
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs backend ruff and pytest, and frontend `npm run lint` and `npm run build`. The auth commits add a PostgreSQL 16 service, create `healthify_test`, and run `alembic upgrade head` before pytest.
+GitHub Actions (`.github/workflows/ci.yml`) runs, on push and pull request:
+
+- Backend: install, `ruff check`, `ruff format --check`, create `healthify_test` on a PostgreSQL 16 service, `alembic upgrade head`, then `pytest`.
+- Frontend: `npm ci`, `npm run lint`, `npm run build`.
+
+Pytest drops and recreates schema `public` on `healthify_test` and runs `alembic upgrade head` again, so the suite also proves the migration applies to an empty database.
 
 ## Security limitations
 

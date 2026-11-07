@@ -10,6 +10,30 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: healthify
+          POSTGRES_PASSWORD: healthify
+          POSTGRES_DB: healthify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U healthify -d healthify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://healthify:healthify@localhost:5432/healthify_test
+      SESSION_COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+      TRUST_X_FORWARDED_FOR: "false"
+      LOGIN_RATE_LIMIT_MAX_FAILURES: "5"
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: "900"
+      SESSION_COOKIE_NAME: healthify_session
+      SESSION_TTL_SECONDS: "604800"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +45,23 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
+      - name: Create test database and migrate
+        run: |
+          python - <<'PY'
+          import psycopg
+          conn = psycopg.connect(
+              host="localhost",
+              user="healthify",
+              password="healthify",
+              dbname="healthify",
+              autocommit=True,
+          )
+          with conn.cursor() as cursor:
+              cursor.execute("SELECT 1 FROM pg_database WHERE datname = 'healthify_test'")
+              if cursor.fetchone() is None:
+                  cursor.execute("CREATE DATABASE healthify_test")
+          PY
+          alembic upgrade head
       - name: Test backend
         run: pytest -q
 
