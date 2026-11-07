@@ -60,9 +60,7 @@ class Settings(BaseSettings):
             raise ValueError("LOGIN_RATE_LIMIT_MAX_FAILURES must be at least 1.")
         if self.login_rate_limit_window_seconds <= 0:
             raise ValueError("LOGIN_RATE_LIMIT_WINDOW_SECONDS must be positive.")
-        if not self.session_cookie_name or any(
-            character.isspace() for character in self.session_cookie_name
-        ):
+        if not self.session_cookie_name or any(character.isspace() for character in self.session_cookie_name):
             raise ValueError("SESSION_COOKIE_NAME must be a non-empty token without spaces.")
         return self
 

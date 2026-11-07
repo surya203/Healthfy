@@ -1,0 +1,23 @@
+/** Fixed copy. Server messages match the Healthify API contract. */
+export const messages = {
+  nameRequired: "Name is required.",
+  nameMax: "Name must be at most 100 characters.",
+  nameInvalid: "Name contains invalid characters.",
+  emailRequired: "Email is required.",
+  emailInvalid: "Enter a valid email address.",
+  emailMax: "Email must be at most 254 characters.",
+  passwordRequired: "Password is required.",
+  passwordMin: "Password must be at least 8 characters.",
+  passwordMax: "Password must be at most 128 characters.",
+  confirmRequired: "Confirm your password.",
+  confirmMismatch: "Passwords do not match.",
+  invalidCredentials: "Invalid email or password.",
+  emailExists: "An account with this email already exists.",
+  unauthenticated: "Authentication required.",
+  rateLimited: "Too many login attempts. Try again later.",
+  forbidden: "Origin is not allowed.",
+  validation: "Invalid input.",
+  network: "Unable to reach Healthify. Check your connection and try again.",
+  unexpected: "Healthify returned an unexpected response.",
+  generic: "Something went wrong. Try again.",
+} as const;
