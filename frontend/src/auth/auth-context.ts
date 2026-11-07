@@ -7,6 +7,7 @@ export type AuthContextValue = {
   status: AuthStatus;
   user: User | null;
   hydrationError: string | null;
+  slow: boolean;
   register: (input: RegisterBody) => Promise<void>;
   login: (input: LoginBody) => Promise<void>;
   logout: () => Promise<void>;

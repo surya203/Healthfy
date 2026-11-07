@@ -4,13 +4,18 @@ import { parseRetryAfter } from "./presentError";
 import type { AuthClient, ErrorDetails, LoginBody, RegisterBody, RequestOptions, User } from "./types";
 
 export const DEFAULT_API_BASE_URL = "http://localhost:8000";
+export const PRODUCTION_API_BASE_URL = "/api";
+export const SLOW_REQUEST_MS = 2_500;
+export const REQUEST_TIMEOUT_MS = 55_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export function readApiBaseUrl(value?: string): string {
-  const raw = value?.trim();
-  const base = raw ? raw : DEFAULT_API_BASE_URL;
-  return base.replace(/\/+$/, "");
+export function readApiBaseUrl(value?: string, prod = false): string {
+  const raw = value?.trim() ?? "";
+  const base = raw.replace(/\/+$/, "");
+  if (!prod) return base || DEFAULT_API_BASE_URL;
+  if (base.startsWith("/") && !base.startsWith("//")) return base;
+  return PRODUCTION_API_BASE_URL;
 }
 
 type Endpoint = "register" | "login" | "me" | "logout";
@@ -107,6 +112,19 @@ export function parseUser(value: unknown): User {
   return { id, name, email, created_at: createdAt };
 }
 
+function combineSignals(signals: Array<AbortSignal | undefined>): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (!signal) continue;
+    if (signal.aborted) {
+      controller.abort();
+      return controller.signal;
+    }
+    signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  return controller.signal;
+}
+
 async function request(
   fetchImpl: typeof fetch,
   baseUrl: string,
@@ -121,6 +139,10 @@ async function request(
     headers["Content-Type"] = "application/json";
     payload = JSON.stringify(body);
   }
+  const timeout = new AbortController();
+  const timeoutId = setTimeout(() => timeout.abort(), REQUEST_TIMEOUT_MS);
+  const slowId = setTimeout(() => options?.onSlow?.(), SLOW_REQUEST_MS);
+  const signal = combineSignals([options?.signal, timeout.signal]);
   try {
     // The browser sets Origin. Do not set it here; that is not the CSRF protocol.
     return await fetchImpl(`${baseUrl}${path}`, {
@@ -129,11 +151,17 @@ async function request(
       cache: "no-store",
       headers,
       body: payload,
-      signal: options?.signal,
+      signal,
     });
   } catch (error) {
-    if (isAbortError(error)) throw error;
+    if (isAbortError(error)) {
+      if (options?.signal?.aborted) throw error;
+      throw new AuthNetworkError(messages.slowTimeout);
+    }
     throw new AuthNetworkError(messages.network);
+  } finally {
+    clearTimeout(timeoutId);
+    clearTimeout(slowId);
   }
 }
 
@@ -141,7 +169,7 @@ export function createHttpAuthClient(options?: {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
 }): AuthClient {
-  const baseUrl = readApiBaseUrl(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL);
+  const baseUrl = readApiBaseUrl(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL, import.meta.env.PROD);
   const fetchImpl = options?.fetchImpl ?? fetch;
 
   return {

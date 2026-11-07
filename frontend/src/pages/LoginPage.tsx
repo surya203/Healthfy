@@ -6,7 +6,7 @@ import { AuthForm } from "../components/AuthForm";
 import { Page } from "../components/Page";
 
 export function LoginPage() {
-  const { login, hydrationError } = useAuth();
+  const { login, hydrationError, slow } = useAuth();
   const form = useAuthForm({ email: "", password: "" }, validateLogin, async (values) => {
     await login(values);
   });
@@ -46,6 +46,7 @@ export function LoginPage() {
         pendingLabel="Signing in…"
         focusTarget={form.focusTarget}
         focusToken={form.focusToken}
+        slow={slow}
         onChange={(name, value) => form.onChange(name, value)}
         onSubmit={form.onSubmit}
         footer={

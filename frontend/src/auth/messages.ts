@@ -20,4 +20,6 @@ export const messages = {
   network: "Unable to reach Healthify. Check your connection and try again.",
   unexpected: "Healthify returned an unexpected response.",
   generic: "Something went wrong. Try again.",
+  waking: "The server may be waking up. This can take about a minute.",
+  slowTimeout: "The server did not respond in time. The server may be waking up. Try again.",
 } as const;
