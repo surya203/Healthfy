@@ -247,7 +247,11 @@ Example: 3 wrong passwords (`401`), one correct password (`200`, 3 rows remain),
 
 The header is listed in `Access-Control-Expose-Headers` so page JavaScript can read it.
 
-Client IP is the immediate TCP peer (`scope["client"]` / `request.client.host`). `X-Forwarded-For` is ignored unless `TRUST_X_FORWARDED_FOR=true`. When that flag is true, the **rightmost** hop is used. That is only correct behind one proxy that appends the peer address, and only if clients cannot open their own connection to the API. Leave the flag false unless that proxy is actually the only path to the process.
+Client IP is the immediate TCP peer (`scope["client"]` / `request.client.host`) unless an explicit trust mode is enabled.
+
+`TRUST_X_FORWARDED_FOR` defaults to false. When true, the rightmost `X-Forwarded-For` hop is used. That flag is not the Render deployment mode: Render's public URL stays on the internet, Render appends to `X-Forwarded-For` instead of replacing it, and the Python runtime sets `FORWARDED_ALLOW_IPS=*` ([Render environment variables](https://render.com/docs/environment-variables)). Leave `TRUST_X_FORWARDED_FOR=false` on Render.
+
+`TRUSTED_PROXY_MODE` also defaults to false. Turn it on only for the Render service. It ignores `X-Forwarded-For`, `X-Real-IP`, `X-Vercel-Forwarded-For`, and `CF-Connecting-IP`. A request is accepted only when `X-Healthify-Proxy-Auth` matches `TRUSTED_PROXY_SECRET` (SHA-256 then `hmac.compare_digest`) and `X-Healthify-Client-IP` is exactly one IPv4 or IPv6 address. Otherwise the response is `403 FORBIDDEN` and no login-failure row is written. `GET /health` and `HEAD /health` stay open so Render's health check, which does not send the secret, can succeed ([Render health checks](https://render.com/docs/health-checks)). The two trust flags cannot be true together, and the secret must be at least 32 characters or the process refuses to start.
 
 Uvicorn's default is `--proxy-headers` with trusted peers `127.0.0.1,::1` (or `$FORWARDED_ALLOW_IPS` when that variable is set). For those peers it rewrites `scope["client"]` from `X-Forwarded-For` **before** the application runs, so `TRUST_X_FORWARDED_FOR=false` never sees the real peer. A client connecting from loopback can then move its login-limit bucket by sending one address or a list; the rewritten peer is the rightmost hop uvicorn still treats as untrusted. The supported process disables that rewrite. Do not start the API with a bare `uvicorn app.main:app`.
 
@@ -338,9 +342,12 @@ Copy `.env.example` to `.env` in the repository root. The API reads that file. D
 | `SESSION_COOKIE_SECURE` | unset: `false` unless `APP_ENV=production`, then `true` | `Secure` attribute. Production plus `false` refuses to start |
 | `LOGIN_RATE_LIMIT_MAX_FAILURES` | `5` | Failed logins before `429` |
 | `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `900` | Rolling window |
-| `TRUST_X_FORWARDED_FOR` | `false` | When `false`, ignore `X-Forwarded-For` and key the limit on the TCP peer. Requires the supported server below |
-| `HOST` | `127.0.0.1` | Bind address for `python -m app.server` |
-| `PORT` | `8000` | Bind port for `python -m app.server` |
+| `TRUST_X_FORWARDED_FOR` | `false` | Raw `X-Forwarded-For` rightmost hop. Leave false on Render |
+| `TRUSTED_PROXY_MODE` | `false` | Require the authenticated proxy headers below. Render production: `true` |
+| `TRUSTED_PROXY_SECRET` | empty | Server-only shared secret, at least 32 characters. Never a `VITE_` variable |
+| `RUN_MIGRATIONS` | unset | `true` on Render so startup runs `alembic upgrade head` before bind |
+| `HOST` | `127.0.0.1` | Bind address. Render blueprint sets `0.0.0.0` |
+| `PORT` | `8000` | Bind port. Render injects this; do not hard-code it in the blueprint |
 | `UVICORN_RELOAD` | unset | Set to `1` to enable reload. Leave unset in production |
 
 Changing the rate-limit or TTL variables changes behavior. Tests and this document assume the defaults above.
@@ -486,6 +493,59 @@ Password hashing is Argon2id with explicit parameters: `time_cost=3`, `memory_co
 
 Migrations are Alembic revisions under `backend/alembic/versions`. Apply them with `alembic upgrade head` from `backend/`.
 
+## Render, Neon, and Vercel
+
+This repo does not contain a Neon URL, a Render URL, a Vercel URL, or a proxy secret. Placeholders below are names you replace in the dashboards.
+
+`render.yaml` is a Blueprint for one free Python web service (`healthify-api`). It does not provision Neon or Vercel. Free web services cannot set `preDeployCommand` ([Blueprint spec](https://render.com/docs/blueprint-spec)), so the start command is `python -m app.server` with `RUN_MIGRATIONS=true`. That runs `alembic upgrade head` and only then binds `0.0.0.0:$PORT` with `proxy_headers=False` and an empty forwarded allow-list. `healthCheckPath` is `/health`. Python is pinned with `PYTHON_VERSION=3.12.3`, the interpreter these tests used ([Setting your Python version](https://render.com/docs/python-version)). Render's own Python image would otherwise set `FORWARDED_ALLOW_IPS=*` ([default environment variables](https://render.com/docs/environment-variables)); the blueprint sets that variable empty and the process ignores it anyway.
+
+| Render variable | Blueprint value | You enter |
+| --- | --- | --- |
+| `APP_ENV` | `production` | |
+| `SESSION_COOKIE_SECURE` | `true` | |
+| `HOST` | `0.0.0.0` | |
+| `RUN_MIGRATIONS` | `true` | |
+| `TRUSTED_PROXY_MODE` | `true` | |
+| `TRUST_X_FORWARDED_FOR` | `false` | |
+| `FORWARDED_ALLOW_IPS` | empty | |
+| `PYTHON_VERSION` | `3.12.3` | |
+| `DATABASE_URL` | `sync: false` | Neon **direct** URL, not the `-pooler` host. Shape: `postgresql://USER:PASSWORD@ep-HOST.region.aws.neon.tech/DBNAME?sslmode=require&channel_binding=require` ([Neon connection strings](https://neon.com/docs/connect/connect-from-any-app), [pooled vs direct](https://neon.com/docs/connect/choose-connection)). The app rewrites `postgresql://` and `postgres://` to `postgresql+psycopg://` and keeps the query string. Production refuses to start unless `sslmode` is `require`, `verify-ca`, or `verify-full`. Use the direct host because startup runs Alembic and login takes a transaction advisory lock. |
+| `TRUSTED_PROXY_SECRET` | `sync: false` | `openssl rand -hex 32`. Same value on Vercel as a server env var. |
+| `CORS_ORIGINS` | `sync: false` | Exact Vercel browser origins, comma-separated. Placeholder: `https://YOUR_VERCEL_PROJECT.vercel.app` |
+
+Do not put those three dashboard values in git.
+
+### Why a static rewrite is not enough
+
+Vercel external rewrites can strip `/api` (`/api/:path*` to `https://RENDER_HOST/:path*`) and can set a secret header from a server environment variable. The documented `routes` transform uses `op: set`, which replaces a visitor-supplied value ([Rewrites on Vercel](https://vercel.com/docs/routing/rewrites)). That same page says an external rewrite forwards `x-real-ip` and `x-forwarded-for` as the visitor IP. Those header names are not safe to trust on Render:
+
+- Render documents the path Client, Cloudflare, Render load balancer, service ([Uptime best practices](https://render.com/docs/uptime-best-practices)). It does not document a spoof-proof client IP for application rate limits. Its Python image sets `FORWARDED_ALLOW_IPS=*`.
+- A public `onrender.com` URL cannot be limited to Vercel's egress on the free plan. Inbound IP rules for web services require Scale or Enterprise ([Inbound IP rules](https://render.com/docs/inbound-ip-rules)).
+- Anyone who can open that URL can send `X-Forwarded-For`, `X-Real-IP`, or `X-Vercel-Forwarded-For`. Cloudflare's `CF-Connecting-IP`, when the caller is Vercel, is a Vercel egress address shared by visitors, not the browser.
+- The documented secret transform copies an environment variable. It does not document copying the per-request visitor IP into a custom header that Cloudflare will leave alone.
+
+So the rate-limit identity has to be decided where Vercel has already overwritten `X-Forwarded-For` to stop spoofing ([Vercel request headers](https://vercel.com/docs/headers/request-headers)), then carried to Render in a header of our own together with the secret.
+
+### Frontend contract the Vercel function must implement
+
+The browser keeps calling the Vercel origin. Local development stays `http://localhost:8000` with `credentials: 'include'` and no proxy headers. Production base URL becomes same-origin `/api` (no trailing slash), for example requests to `/api/auth/login`. The existing API paths stay `/auth/*`; the function strips `/api` before it calls Render.
+
+The function is server code. Read the visitor IP from `x-forwarded-for` or `x-vercel-forwarded-for` inside that function, take one address, and reject the browser request if that value is not a single IP. Then forward to `https://YOUR_RENDER_SERVICE.onrender.com/<path-without-api>` with:
+
+| Header | Value |
+| --- | --- |
+| `X-Healthify-Proxy-Auth` | `TRUSTED_PROXY_SECRET` from the Vercel server environment |
+| `X-Healthify-Client-IP` | that single IP |
+| `Origin` | the browser `Origin`, unchanged |
+| `Cookie` | the browser `Cookie`, unchanged |
+| `Content-Type` | unchanged for register and login |
+
+Forward the body unchanged. Return Render's status, body, `Set-Cookie`, and `Retry-After` to the browser. Do not set `Domain` on the cookie. Do not put the secret in `VITE_` variables, `vercel.json` literals, or client JavaScript.
+
+`CORS_ORIGINS` must be the exact page origin the browser sends, such as `https://YOUR_VERCEL_PROJECT.vercel.app`. The cookie is then host-only for that origin: `Secure`, `SameSite=Lax`, `Path=/`. Same-origin `/api` requests send it. A cross-origin call from the page straight to `onrender.com` is not the supported client.
+
+The frontend auth client still defaults to `http://localhost:8000`. Production needs the base URL changed to `/api` and the function added. That change belongs to the frontend engineer; this branch does not edit those files.
+
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs, on push and pull request:
@@ -507,8 +567,8 @@ Pytest drops and recreates schema `public` on `healthify_test` and runs `alembic
 - There is no email verification, password reset, breach-password check, or MFA. Those are out of scope.
 - Password policy is length only (8–128). Passwords are not trimmed.
 - Expired session and failure rows are not swept by a background job. Failure rows older than the window are deleted on a later login attempt. Expired sessions are rejected and kept.
-- `TRUST_X_FORWARDED_FOR=false` keys the limit on the TCP peer only when the process is started with `python -m app.server` or `uvicorn ... --no-proxy-headers --forwarded-allow-ips=`. A bare `uvicorn` command trusts loopback proxy headers and lets that client choose the bucket with `X-Forwarded-For`.
-- With `TRUST_X_FORWARDED_FOR=true`, a client that can connect directly can still set the rightmost hop. Keep the API unreachable except through the proxy, and leave uvicorn proxy headers disabled.
+- `TRUST_X_FORWARDED_FOR=false` keys the limit on the TCP peer only when the process is started with `python -m app.server` or `uvicorn ... --no-proxy-headers --forwarded-allow-ips=`. A bare `uvicorn` command trusts loopback proxy headers, and Render's Python image sets `FORWARDED_ALLOW_IPS=*`. Either one lets a caller choose the bucket with `X-Forwarded-For`.
+- `TRUSTED_PROXY_MODE=true` fail-closes every route except `/health` unless the shared secret and a single client IP are valid. The secret only proves the caller is our proxy. It does not by itself prove which IP is real unless that proxy copies an IP Vercel already authenticated. A static rewrite is not that proxy. Direct calls to the public Render URL without the secret get `403` and do not share one global bucket.
 - Do not run `APP_ENV=development` (insecure cookie) on an untrusted network.
 - Do not log request bodies at a proxy. The app logs startup config and unhandled exception paths only, without the database URL, passwords, tokens, or hashes.
 - Example database credentials in `.env.example` are for local PostgreSQL only.

@@ -5,19 +5,35 @@ Uvicorn otherwise installs ProxyHeadersMiddleware and trusts 127.0.0.1 and ::1
 before this app reads TRUST_X_FORWARDED_FOR. This module is the startup path
 that keeps the TCP peer intact.
 
-Do not enable uvicorn --proxy-headers in production. The only supported way to
-honor X-Forwarded-For is TRUST_X_FORWARDED_FOR=true, with the app reachable
-only from the proxy that appends the client address.
+Do not enable uvicorn --proxy-headers. Render's Python runtime sets
+FORWARDED_ALLOW_IPS=* which would make that middleware trust client-supplied
+forwarded addresses. This module always passes proxy_headers=False and an
+empty forwarded allow-list, ignoring that environment variable.
+
+Per-client identity on Render is TRUSTED_PROXY_MODE, not X-Forwarded-For.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 import uvicorn
 
 logger = logging.getLogger("healthify")
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+
+
+def migrations_enabled() -> bool:
+    return os.environ.get("RUN_MIGRATIONS", "") in {"1", "true", "True"}
+
+
+def run_migrations() -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config(str(_BACKEND_ROOT / "alembic.ini")), "head")
 
 
 def uvicorn_config() -> dict[str, object]:
@@ -33,6 +49,9 @@ def uvicorn_config() -> dict[str, object]:
 
 
 def main() -> None:
+    if migrations_enabled():
+        logger.info("Applying Alembic migrations before bind")
+        run_migrations()
     config = uvicorn_config()
     logger.info(
         "Starting uvicorn host=%s port=%s proxy_headers=false forwarded_allow_ips=empty reload=%s",

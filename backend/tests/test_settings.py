@@ -12,6 +12,12 @@ CONTRACT_ENV_KEYS = (
     "LOGIN_RATE_LIMIT_MAX_FAILURES",
     "LOGIN_RATE_LIMIT_WINDOW_SECONDS",
     "TRUST_X_FORWARDED_FOR",
+    "TRUSTED_PROXY_MODE",
+    "TRUSTED_PROXY_SECRET",
+    "RUN_MIGRATIONS",
+    "HOST",
+    "PORT",
+    "FORWARDED_ALLOW_IPS",
 )
 
 
@@ -35,6 +41,8 @@ def test_contract_defaults(isolated_env: None) -> None:
     assert settings.login_rate_limit_max_failures == 5
     assert settings.login_rate_limit_window_seconds == 900
     assert settings.trust_x_forwarded_for is False
+    assert settings.trusted_proxy_mode is False
+    assert settings.trusted_proxy_secret == ""
 
 
 def test_cors_origins_are_trimmed_and_wildcard_is_rejected(isolated_env: None) -> None:
@@ -52,8 +60,37 @@ def test_cors_origins_are_trimmed_and_wildcard_is_rejected(isolated_env: None) -
         Settings(_env_file=None, cors_origins=" , ")
 
 
+_PRODUCTION_DATABASE_URL = (
+    "postgresql://placeholder:placeholder@ep-example.region.aws.neon.tech/neondb"
+    "?sslmode=require&channel_binding=require"
+)
+
+
 def test_production_cookie_must_be_secure(isolated_env: None) -> None:
     with pytest.raises(ValueError, match="SESSION_COOKIE_SECURE"):
-        Settings(_env_file=None, app_env="production", session_cookie_secure=False)
-    settings = Settings(_env_file=None, app_env="production")
+        Settings(
+            _env_file=None,
+            app_env="production",
+            session_cookie_secure=False,
+            database_url=_PRODUCTION_DATABASE_URL,
+        )
+    settings = Settings(_env_file=None, app_env="production", database_url=_PRODUCTION_DATABASE_URL)
     assert settings.session_cookie_secure is True
+    assert settings.database_url.startswith("postgresql+psycopg://")
+    assert "sslmode=require" in settings.database_url
+    assert "channel_binding=require" in settings.database_url
+    assert "placeholder:placeholder" in settings.database_url
+
+
+def test_production_database_url_requires_ssl_and_proxy_modes_do_not_combine(isolated_env: None) -> None:
+    with pytest.raises(ValueError, match="sslmode"):
+        Settings(_env_file=None, app_env="production", database_url="postgresql+psycopg://u:p@localhost/db")
+    with pytest.raises(ValueError, match="cannot both"):
+        Settings(
+            _env_file=None,
+            trusted_proxy_mode=True,
+            trust_x_forwarded_for=True,
+            trusted_proxy_secret="s" * 32,
+        )
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_SECRET"):
+        Settings(_env_file=None, trusted_proxy_mode=True, trusted_proxy_secret="short")

@@ -90,8 +90,47 @@ def test_real_uvicorn_ignores_forwarded_for_unless_trusted(db, seed_login_failur
         assert "203.0.113.9" not in counts
 
 
+def test_real_uvicorn_trusted_proxy_fail_closed(db) -> None:
+    secret = "r" * 32
+    spoofed = {
+        "X-Forwarded-For": "203.0.113.9, 198.51.100.20",
+        "X-Real-IP": "192.0.2.8",
+        "X-Vercel-Forwarded-For": "198.51.100.8",
+    }
+    with _server("false", TRUSTED_PROXY_MODE="true", TRUSTED_PROXY_SECRET=secret) as base:
+        assert httpx.get(f"{base}/health", timeout=10).status_code == 200
+        denied = httpx.post(
+            f"{base}/auth/login",
+            json={"email": "ada@example.com", "password": "wrong-password"},
+            headers=spoofed,
+            timeout=10,
+        )
+        assert denied.status_code == 403
+        assert denied.json()["error"]["code"] == "FORBIDDEN"
+        bad_secret = httpx.post(
+            f"{base}/auth/login",
+            json={"email": "ada@example.com", "password": "wrong-password"},
+            headers={**spoofed, "X-Healthify-Proxy-Auth": "n" * 32, "X-Healthify-Client-IP": "203.0.113.40"},
+            timeout=10,
+        )
+        assert bad_secret.status_code == 403
+        accepted = httpx.post(
+            f"{base}/auth/login",
+            json={"email": "ada@example.com", "password": "wrong-password"},
+            headers={
+                **spoofed,
+                "X-Healthify-Proxy-Auth": secret,
+                "X-Healthify-Client-IP": "203.0.113.40",
+            },
+            timeout=10,
+        )
+        assert accepted.status_code == 401
+        reload(db)
+        assert list(db.scalars(select(LoginFailure.client_ip))) == ["203.0.113.40"]
+
+
 @contextmanager
-def _server(trust_forwarded: str) -> Iterator[str]:
+def _server(trust_forwarded: str, **overrides: str) -> Iterator[str]:
     port = _free_port()
     env = os.environ.copy()
     env.update(
@@ -102,11 +141,12 @@ def _server(trust_forwarded: str) -> Iterator[str]:
             "TRUST_X_FORWARDED_FOR": trust_forwarded,
             "UVICORN_RELOAD": "",
             "DATABASE_URL": get_settings().database_url,
-            # Dangerous uvicorn default. The supported launcher must ignore it.
-            "FORWARDED_ALLOW_IPS": "127.0.0.1,::1",
+            # Render's Python runtime sets this to "*". The launcher must ignore it.
+            "FORWARDED_ALLOW_IPS": "*",
             "PYTHONUNBUFFERED": "1",
         }
     )
+    env.update(overrides)
     backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     process = subprocess.Popen(
         [sys.executable, "-m", "app.server"],

@@ -1,0 +1,57 @@
+# Render Blueprint for the Healthify API only.
+# Creating a Blueprint from this file provisions a service. Do not apply it
+# until the dashboard prompts for the sync:false values are ready.
+# https://render.com/docs/blueprint-spec
+#
+# Free web services cannot use preDeployCommand
+# (https://render.com/docs/blueprint-spec). RUN_MIGRATIONS=true makes
+# `python -m app.server` apply Alembic migrations before it binds the port.
+
+services:
+  - type: web
+    name: healthify-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install .
+    startCommand: python -m app.server
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: HOST
+        value: 0.0.0.0
+      - key: APP_ENV
+        value: production
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_COOKIE_NAME
+        value: healthify_session
+      - key: SESSION_TTL_SECONDS
+        value: "604800"
+      - key: LOGIN_RATE_LIMIT_MAX_FAILURES
+        value: "5"
+      - key: LOGIN_RATE_LIMIT_WINDOW_SECONDS
+        value: "900"
+      - key: TRUST_X_FORWARDED_FOR
+        value: "false"
+      # Render's Python runtime otherwise sets this to "*".
+      # https://render.com/docs/environment-variables
+      - key: FORWARDED_ALLOW_IPS
+        value: ""
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: TRUSTED_PROXY_MODE
+        value: "true"
+      # Neon direct (non-pooler) URL. Placeholder shape only; enter the real
+      # value in the dashboard. Must include sslmode=require.
+      # postgresql://USER:PASSWORD@ep-HOST.region.aws.neon.tech/DBNAME?sslmode=require&channel_binding=require
+      - key: DATABASE_URL
+        sync: false
+      # openssl rand -hex 32. Same value as the Vercel server env. Never a VITE_ variable.
+      - key: TRUSTED_PROXY_SECRET
+        sync: false
+      # Exact browser origins, comma-separated. Example placeholder:
+      # https://YOUR_VERCEL_PROJECT.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
