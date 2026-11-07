@@ -6,8 +6,25 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
       "source": "/((?!api(?:/|$)|assets/).*)",
       "destination": "/index.html"
+    }
+  ],
+  "routes": [
+    {
+      "src": "^/api/(?<proxyPath>.+)$",
+      "continue": true,
+      "transforms": [
+        {
+          "type": "request.path",
+          "op": "set",
+          "args": "/api/$proxyPath"
+        }
+      ]
     }
   ]
 }

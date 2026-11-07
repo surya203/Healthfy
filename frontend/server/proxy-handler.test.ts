@@ -4,8 +4,8 @@
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from "./[...path]";
+import { readdirSync, readFileSync } from "node:fs";
+import { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, default as apiEntry } from "../api/index.js";
 import {
   parseSecret,
   parseSingleIp,
@@ -15,7 +15,7 @@ import {
   readProxyConfig,
   stripApiPath,
   stripCookieDomain,
-} from "./proxy-handler";
+} from "./proxy-handler.js";
 
 const SECRET = "fixture-not-a-real-secret-32bytes!";
 const UPSTREAM = "https://healthify-api.example";
@@ -120,9 +120,14 @@ describe("server config", () => {
 describe("path safety", () => {
   it("strips /api and rejects traversal", () => {
     expect(stripApiPath("/api/auth/login")).toBe("/auth/login");
+    expect(stripApiPath("/api/auth/me")).toBe("/auth/me");
+    expect(stripApiPath("/api/auth/logout")).toBe("/auth/logout");
     expect(stripApiPath("/api/health")).toBe("/health");
-    expect(stripApiPath("/api/auth/login/")).toBe("/auth/login/");
+    expect(stripApiPath("/api/auth/login/")).toBeNull();
+    expect(stripApiPath("/api")).toBeNull();
     expect(stripApiPath("/auth/login")).toBeNull();
+    expect(stripApiPath("/auth/me")).toBeNull();
+    expect(stripApiPath("/auth/logout")).toBeNull();
     expect(stripApiPath("/api/../secret")).toBeNull();
     expect(stripApiPath("/api/auth/%2e%2e/secret")).toBeNull();
     expect(stripApiPath("/api/auth/%2fsecret")).toBeNull();
@@ -264,6 +269,28 @@ describe("proxyRequest", () => {
     expect(text).not.toContain(SECRET);
   });
 
+  it("keeps the upstream path from the URL pathname when the query tries to retarget it", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    const response = await proxyRequest(
+      incoming("/api/auth/me?path=/health&url=https://evil.example/secret", { headers: platformHeaders() }),
+      config(),
+      fetchImpl,
+    );
+    expect(response.status).toBe(204);
+    const upstreamUrl = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(upstreamUrl.origin).toBe("https://healthify-api.example");
+    expect(upstreamUrl.pathname).toBe("/auth/me");
+    expect(upstreamUrl.searchParams.get("path")).toBe("/health");
+    expect(upstreamUrl.searchParams.get("url")).toBe("https://evil.example/secret");
+    const spoofed = await proxyRequest(
+      incoming("/api?path=/auth/login", { headers: platformHeaders() }),
+      config(),
+      fetchImpl,
+    );
+    expect(spoofed.status).toBe(503);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("does not leak the secret when the upstream is down", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
       throw new TypeError("connect ECONNREFUSED");
@@ -356,9 +383,10 @@ describe("loopback integration", () => {
 });
 
 describe("vercel routing config", () => {
-  it("does not rewrite /api or assets to the SPA shell or an external host", () => {
+  it("sends every /api auth and health path to one function and leaves the SPA separate", () => {
     const configFile = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8")) as {
       rewrites: { source: string; destination: string }[];
+      routes: { src: string; continue?: boolean; transforms: { type: string; op: string; args: string }[] }[];
       framework: string;
       installCommand: string;
       buildCommand: string;
@@ -368,20 +396,38 @@ describe("vercel routing config", () => {
     expect(configFile.installCommand).toBe("npm ci");
     expect(configFile.buildCommand).toBe("npm run build");
     expect(configFile.outputDirectory).toBe("dist");
-    expect(configFile.rewrites).toHaveLength(1);
-    const rewrite = configFile.rewrites[0];
-    expect(rewrite?.destination).toBe("/index.html");
-    expect(rewrite?.destination).not.toMatch(/^https?:/u);
-    const pattern = new RegExp(`^${rewrite?.source ?? ""}$`, "u");
-    expect(pattern.test("/api/auth/login")).toBe(false);
-    expect(pattern.test("/api")).toBe(false);
-    expect(pattern.test("/assets/index-abc.js")).toBe(false);
-    expect(pattern.test("/login")).toBe(true);
-    expect(pattern.test("/")).toBe(true);
+    const apiRewrite = configFile.rewrites[0];
+    const spaRewrite = configFile.rewrites[1];
+    expect(apiRewrite?.destination).toBe("/api");
+    expect(apiRewrite?.destination).not.toMatch(/[?]/u);
+    expect(spaRewrite?.destination).toBe("/index.html");
+    for (const rewrite of configFile.rewrites) {
+      expect(rewrite.destination).not.toMatch(/^https?:/u);
+      expect(rewrite.destination).not.toMatch(/[?]/u);
+    }
+    const apiPattern = new RegExp(`^${apiRewrite?.source ?? ""}$`, "u");
+    const spaPattern = new RegExp(`^${spaRewrite?.source ?? ""}$`, "u");
+    for (const path of ["/api/health", "/api/auth/register", "/api/auth/login", "/api/auth/me", "/api/auth/logout"]) {
+      expect(apiPattern.test(path)).toBe(true);
+      expect(spaPattern.test(path)).toBe(false);
+    }
+    for (const path of ["/", "/login", "/register", "/auth/me", "/auth/logout", "/auth/register", "/auth/login"]) {
+      expect(apiPattern.test(path)).toBe(false);
+      expect(spaPattern.test(path)).toBe(true);
+    }
+    expect(spaPattern.test("/assets/index-abc.js")).toBe(false);
+    const pathRoute = configFile.routes[0];
+    expect(pathRoute?.continue).toBe(true);
+    expect(pathRoute?.src).not.toMatch(/[?&][A-Za-z_]+=/u);
+    const pathTransform = pathRoute?.transforms[0];
+    expect(pathTransform).toMatchObject({ type: "request.path", op: "set", args: "/api/$proxyPath" });
+    expect(pathTransform?.args).not.toMatch(/[?]/u);
+    expect(readdirSync(new URL("../api/", import.meta.url))).toEqual(["index.ts"]);
   });
 
-  it("exports a node function for every forwarded method", () => {
-    expect(GET).toBeTypeOf("function");
+  it("exports one node handler for every forwarded method", () => {
+    expect(apiEntry.fetch).toBeTypeOf("function");
+    expect(GET).toBe(apiEntry.fetch);
     expect(POST).toBe(GET);
     expect(HEAD).toBe(GET);
     expect(OPTIONS).toBe(GET);

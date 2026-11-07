@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.api.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-api"
+  },
+  "include": ["api/index.ts", "server/proxy-handler.ts"],
+  "exclude": ["server/**/*.test.ts"]
+}

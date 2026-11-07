@@ -2,7 +2,7 @@
 
 This is the deployment contract for the Vite app and its same-origin API proxy. It does not create a Vercel project, deploy, or store a real secret. The Render service name below is a placeholder, not a verified live host.
 
-The proxy matches the unmerged backend contract in PR #5 (`b803f11`): Render accepts traffic only when `X-Healthify-Proxy-Auth` matches `TRUSTED_PROXY_SECRET` and `X-Healthify-Client-IP` is exactly one IPv4 or IPv6 address. `GET /health` and `HEAD /health` stay open on Render so its own probe can succeed. This function still fail-closes `/api/health` when its own config or visitor IP is missing; that probe never goes through Vercel.
+The proxy matches the Render contract from PR #5 (`b803f11`, now on `main`): Render accepts traffic only when `X-Healthify-Proxy-Auth` matches `TRUSTED_PROXY_SECRET` and `X-Healthify-Client-IP` is exactly one IPv4 or IPv6 address. `GET /health` and `HEAD /health` stay open on Render so its own probe can succeed. This function still fail-closes `/api/health` when its own config or visitor IP is missing; that probe never goes through Vercel.
 
 ## Dashboard settings
 
@@ -17,7 +17,13 @@ Set the project root to this directory. `vercel.json` cannot choose the root for
 | Output Directory | `dist` |
 | Node.js Version | 22.x |
 
-`frontend/vercel.json` repeats the install command, build command, output directory, and Vite preset. The rewrite sends non-file routes to `/index.html` and does not match `/api`, `/api/*`, or `/assets/*`. It is not an external rewrite. `/api/*` is the Node.js function in `api/[...path].ts` (`runtime = "nodejs"`, `maxDuration = 60`).
+`frontend/vercel.json` repeats the install command, build command, output directory, and Vite preset. There is one Node.js function, `api/index.ts` (`runtime = "nodejs"`, `maxDuration = 60`). It imports `../server/proxy-handler.js`. The `.js` suffix is the file Node loads after Vercel transpiles the TypeScript; `package.json` has `"type": "module"`, so an extensionless import fails at runtime with `ERR_MODULE_NOT_FOUND`. The helper lives outside `api/` so Vercel does not publish it as its own function.
+
+`frontend/package.json` is `"type": "module"`. Vercel therefore runs the transpiled handler as native Node ESM and does not rewrite those imports to CommonJS.
+
+A non-Next `api/[...path]` file only matches one path segment, so `/api/health` can invoke it while `/api/auth/login` is an edge `NOT_FOUND`. The config does not use a catch-all. A rewrite sends `/api/(.*)` to the existing `/api` function. The rewrite destination is the path `/api` with no query string, so a browser query parameter cannot choose the upstream path. A `request.path` transform sets the path the function reads from `request.url` to `/api/$proxyPath`, captured from the pathname only. The function then allows only `/health`, `/auth/register`, `/auth/login`, `/auth/me`, and `/auth/logout`.
+
+The SPA rewrite sends other routes, including unprefixed `/auth/me` and `/auth/logout`, to `/index.html`. It does not match `/api`, `/api/*`, or `/assets/*`. Those unprefixed `/auth/*` URLs are not API routes.
 
 ## Environment variables
 
@@ -36,7 +42,7 @@ On Render, set `CORS_ORIGINS` to the exact page origin the browser sends, such a
 
 ## Request path
 
-`/api/auth/login` becomes `RENDER_API_BASE_URL + /auth/login`. The query string is preserved. The function rejects `..`, encoded dot segments, backslashes, and a path that would change the upstream origin. It does not follow redirects. A 3xx response becomes `502` with no `Location` header.
+`/api/auth/login` becomes `RENDER_API_BASE_URL + /auth/login`. The same applies to `/api/auth/register`, `/api/auth/me`, `/api/auth/logout`, and `/api/health`. The query string is preserved but never selects the path. The function rejects `..`, encoded segments, backslashes, a bare `/api`, and any other path. It does not follow redirects. A 3xx response becomes `502` with no `Location` header.
 
 Visitor IP, from [Vercel request headers](https://vercel.com/docs/headers/request-headers):
 
