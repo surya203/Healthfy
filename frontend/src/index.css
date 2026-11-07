@@ -1,0 +1,261 @@
+:root {
+  color-scheme: light;
+  --bg: #e7f0ea;
+  --ink: #14241c;
+  --muted: #345046;
+  --card: #ffffff;
+  --line: #c5d5cc;
+  --accent: #0c4f3e;
+  --accent-strong: #08382c;
+  --focus: #0b57d0;
+  --danger: #8d1d2c;
+  --danger-bg: #fdecef;
+  --danger-line: #f3c2c8;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 480px at 8% -10%, #d7efe4 0%, transparent 55%),
+    radial-gradient(900px 420px at 110% 0%, #e7f3d8 0%, transparent 46%),
+    var(--bg);
+}
+
+#root,
+.app {
+  min-height: 100vh;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  padding: 1.25rem 1.25rem 0;
+}
+
+.skip-link {
+  color: var(--accent-strong);
+  font-weight: 600;
+  padding: 0.4rem 0.2rem;
+  white-space: nowrap;
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--accent-strong);
+}
+
+.mark {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.55rem;
+  background: var(--accent);
+  color: white;
+  font-size: 0.95rem;
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 1rem 2.5rem;
+}
+
+.card {
+  width: min(100%, 28rem);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 1.25rem;
+  box-shadow: 0 12px 40px rgba(20, 50, 40, 0.06);
+}
+
+.card > .button,
+.card > .button-secondary {
+  margin-top: 1rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.lead {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  margin-top: 1.15rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+label {
+  font-weight: 600;
+}
+
+.hint,
+.field-error {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.button,
+.button-secondary {
+  min-height: 44px;
+  width: 100%;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button {
+  border: 0;
+  background: var(--accent);
+  color: white;
+}
+
+.button-secondary {
+  background: white;
+  color: var(--accent-strong);
+  border: 1px solid var(--accent);
+}
+
+.button:disabled,
+.button-secondary:disabled {
+  cursor: progress;
+}
+
+.banner {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger-line);
+}
+
+form .banner {
+  margin-top: 0.15rem;
+}
+
+.switch {
+  margin: 1rem 0 0;
+  color: var(--muted);
+}
+
+a {
+  color: var(--accent-strong);
+}
+
+.account {
+  margin: 1rem 0 1.15rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.account div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (min-width: 720px) {
+  .card {
+    padding: 1.6rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}
