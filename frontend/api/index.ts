@@ -1,12 +1,13 @@
-import { proxyRequest, readProxyConfig } from "./proxy-handler";
+import { proxyRequest, readProxyConfig } from "../server/proxy-handler.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-async function handle(request: Request): Promise<Response> {
+function handle(request: Request): Promise<Response> {
   return proxyRequest(request, readProxyConfig(process.env));
 }
 
+export default { fetch: handle };
 export const GET = handle;
 export const POST = handle;
 export const HEAD = handle;

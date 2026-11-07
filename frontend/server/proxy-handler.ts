@@ -82,9 +82,17 @@ export function readProxyConfig(
   return { secret, upstream };
 }
 
+const ALLOWED_UPSTREAM_PATHS = new Set([
+  "/health",
+  "/auth/register",
+  "/auth/login",
+  "/auth/me",
+  "/auth/logout",
+]);
+
 export function stripApiPath(pathname: string): string | null {
-  if (!pathname.startsWith("/api/") && pathname !== "/api") return null;
-  const rest = pathname === "/api" ? "/" : pathname.slice(4);
+  if (!pathname.startsWith("/api/")) return null;
+  const rest = pathname.slice("/api".length);
   if (!rest.startsWith("/") || rest.startsWith("//")) return null;
   if (rest.includes("\\") || rest.includes("\0")) return null;
   if (/%(?:2e|2f|5c|00)/iu.test(rest)) return null;
@@ -94,12 +102,13 @@ export function stripApiPath(pathname: string): string | null {
   } catch {
     return null;
   }
+  if (decoded !== rest) return null;
   if (decoded.includes("\\") || decoded.includes("\0") || decoded.includes("://") || decoded.startsWith("//")) {
     return null;
   }
-  if (/%(?:2e|2f|5c|00)/iu.test(decoded)) return null;
   if (decoded.split("/").some((segment) => segment === "." || segment === "..")) return null;
-  return rest;
+  if (!ALLOWED_UPSTREAM_PATHS.has(decoded)) return null;
+  return decoded;
 }
 
 export function stripCookieDomain(setCookie: string): string | null {
