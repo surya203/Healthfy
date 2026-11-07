@@ -247,7 +247,9 @@ Example: 3 wrong passwords (`401`), one correct password (`200`, 3 rows remain),
 
 The header is listed in `Access-Control-Expose-Headers` so page JavaScript can read it.
 
-Client IP is `request.client.host` (the immediate TCP peer). `X-Forwarded-For` is ignored unless `TRUST_X_FORWARDED_FOR=true`. When that flag is true, the **rightmost** hop is used, which is only correct behind one proxy that appends the peer address. If the flag is on and the client connects directly, the client can supply that value. Leave the flag false unless a trusted proxy is actually in front of the process.
+Client IP is the immediate TCP peer (`scope["client"]` / `request.client.host`). `X-Forwarded-For` is ignored unless `TRUST_X_FORWARDED_FOR=true`. When that flag is true, the **rightmost** hop is used. That is only correct behind one proxy that appends the peer address, and only if clients cannot open their own connection to the API. Leave the flag false unless that proxy is actually the only path to the process.
+
+Uvicorn's default is `--proxy-headers` with trusted peers `127.0.0.1,::1` (or `$FORWARDED_ALLOW_IPS` when that variable is set). For those peers it rewrites `scope["client"]` from `X-Forwarded-For` **before** the application runs, so `TRUST_X_FORWARDED_FOR=false` never sees the real peer. A client connecting from loopback can then move its login-limit bucket by sending one address or a list; the rewritten peer is the rightmost hop uvicorn still treats as untrusted. The supported process disables that rewrite. Do not start the API with a bare `uvicorn app.main:app`.
 
 Rows for that IP older than the window are deleted during a login attempt for that IP. There is no public endpoint to seed or clear this table.
 
@@ -336,7 +338,10 @@ Copy `.env.example` to `.env` in the repository root. The API reads that file. D
 | `SESSION_COOKIE_SECURE` | unset: `false` unless `APP_ENV=production`, then `true` | `Secure` attribute. Production plus `false` refuses to start |
 | `LOGIN_RATE_LIMIT_MAX_FAILURES` | `5` | Failed logins before `429` |
 | `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `900` | Rolling window |
-| `TRUST_X_FORWARDED_FOR` | `false` | When `false`, ignore `X-Forwarded-For` |
+| `TRUST_X_FORWARDED_FOR` | `false` | When `false`, ignore `X-Forwarded-For` and key the limit on the TCP peer. Requires the supported server below |
+| `HOST` | `127.0.0.1` | Bind address for `python -m app.server` |
+| `PORT` | `8000` | Bind port for `python -m app.server` |
+| `UVICORN_RELOAD` | unset | Set to `1` to enable reload. Leave unset in production |
 
 Changing the rate-limit or TTL variables changes behavior. Tests and this document assume the defaults above.
 
@@ -370,10 +375,29 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 alembic upgrade head
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python -m app.server
 ```
 
-Open the API as `http://localhost:8000`. If `localhost` resolves to IPv6 `::1` and nothing is listening there, start uvicorn with `--host localhost` as well, or call the IPv4 address only after adding that origin to `CORS_ORIGINS` and using it consistently.
+`python -m app.server` listens on `127.0.0.1:8000` and forces `proxy_headers=False` and an empty `forwarded_allow_ips`, including when `FORWARDED_ALLOW_IPS` is set in the environment. Reload for local editing:
+
+```bash
+UVICORN_RELOAD=1 python -m app.server
+```
+
+The equivalent uvicorn CLI, if you do not use the module, must include both flags. Either one missing brings back the loopback proxy-header default:
+
+```bash
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --no-proxy-headers --forwarded-allow-ips=
+```
+
+Open the API as `http://localhost:8000`. If `localhost` resolves to IPv6 `::1` and nothing is listening there, start with `HOST=localhost python -m app.server`, or call the IPv4 address only after adding that origin to `CORS_ORIGINS` and using it consistently.
+
+Deployment trust boundary:
+
+- The TCP peer is the rate-limit client whenever `TRUST_X_FORWARDED_FOR=false`.
+- Turn the flag on only for an API that is reachable solely from a reverse proxy. That proxy must append the real client. The application then uses the rightmost `X-Forwarded-For` hop and does not ask uvicorn to interpret the header.
+- Do not combine `TRUST_X_FORWARDED_FOR=true` with uvicorn `--proxy-headers`. Uvicorn skips hops it considers trusted and can disagree with the application's rightmost-hop rule, and a loopback allow-list defeats `TRUST_X_FORWARDED_FOR=false`.
+- Do not set `FORWARDED_ALLOW_IPS`. The supported launcher ignores it by passing an empty allow-list and disabling proxy headers.
 
 Frontend:
 
@@ -424,6 +448,8 @@ Fixtures in `backend/tests/conftest.py` (auth suite):
 | `seed_login_failures(client_ip, attempted_at, count=1)` | Inserts `login_failures` rows through SQLAlchemy. Used to pin `Retry-After` and window edges without a debug route |
 
 Session expiry checks either advance `clock` past the 7-day absolute `expires_at`, or update `sessions.expires_at` / `sessions.revoked_at` in `healthify_test`. Cookie `Max-Age` is not the security boundary.
+
+`tests/test_uvicorn_client_ip.py` starts `python -m app.server` and sends HTTP to that process. `TestClient` does not install uvicorn's proxy-header middleware, so it cannot see the loopback `X-Forwarded-For` rewrite.
 
 ## Data model
 
@@ -481,7 +507,8 @@ Pytest drops and recreates schema `public` on `healthify_test` and runs `alembic
 - There is no email verification, password reset, breach-password check, or MFA. Those are out of scope.
 - Password policy is length only (8–128). Passwords are not trimmed.
 - Expired session and failure rows are not swept by a background job. Failure rows older than the window are deleted on a later login attempt. Expired sessions are rejected and kept.
-- Enable `TRUST_X_FORWARDED_FOR` only behind a proxy that appends the peer. Otherwise leave it false.
+- `TRUST_X_FORWARDED_FOR=false` keys the limit on the TCP peer only when the process is started with `python -m app.server` or `uvicorn ... --no-proxy-headers --forwarded-allow-ips=`. A bare `uvicorn` command trusts loopback proxy headers and lets that client choose the bucket with `X-Forwarded-For`.
+- With `TRUST_X_FORWARDED_FOR=true`, a client that can connect directly can still set the rightmost hop. Keep the API unreachable except through the proxy, and leave uvicorn proxy headers disabled.
 - Do not run `APP_ENV=development` (insecure cookie) on an untrusted network.
 - Do not log request bodies at a proxy. The app logs startup config and unhandled exception paths only, without the database URL, passwords, tokens, or hashes.
 - Example database credentials in `.env.example` are for local PostgreSQL only.

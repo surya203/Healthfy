@@ -30,6 +30,9 @@ jobs:
       SESSION_COOKIE_SECURE: "false"
       CORS_ORIGINS: http://localhost:5173
       TRUST_X_FORWARDED_FOR: "false"
+      # Empty so a raw uvicorn process cannot inherit the loopback proxy-header allow-list.
+      # The supported launcher also forces proxy_headers off and an empty allow-list.
+      FORWARDED_ALLOW_IPS: ""
       LOGIN_RATE_LIMIT_MAX_FAILURES: "5"
       LOGIN_RATE_LIMIT_WINDOW_SECONDS: "900"
       SESSION_COOKIE_NAME: healthify_session
