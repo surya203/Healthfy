@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthApiError, AuthNetworkError, AuthProtocolError } from "./errors";
-import { createHttpAuthClient, parseUser, readApiBaseUrl } from "./httpClient";
+import { createHttpAuthClient, parseUser, readApiBaseUrl, REQUEST_TIMEOUT_MS, SLOW_REQUEST_MS } from "./httpClient";
 import { messages } from "./messages";
 import { ada, jsonResponse } from "../test/fixtures";
 
@@ -16,6 +16,14 @@ describe("readApiBaseUrl", () => {
   it("defaults to the local API and strips a trailing slash", () => {
     expect(readApiBaseUrl(undefined)).toBe("http://localhost:8000");
     expect(readApiBaseUrl(" http://localhost:8000/ ")).toBe("http://localhost:8000");
+    expect(readApiBaseUrl("/api")).toBe("/api");
+  });
+
+  it("uses the same-origin proxy in production and ignores an absolute override", () => {
+    expect(readApiBaseUrl(undefined, true)).toBe("/api");
+    expect(readApiBaseUrl("http://localhost:8000", true)).toBe("/api");
+    expect(readApiBaseUrl("https://healthify-api.example", true)).toBe("/api");
+    expect(readApiBaseUrl("/api/", true)).toBe("/api");
   });
 });
 
@@ -162,13 +170,50 @@ describe("createHttpAuthClient", () => {
     });
   });
 
-  it("turns transport failures into a network error and rethrows abort", async () => {
-    const fetchImpl = vi.fn<typeof fetch>()
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockRejectedValueOnce(new DOMException("Aborted", "AbortError"));
+  it("turns transport failures into a network error and rethrows a caller abort", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      if (init?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      return await new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    });
     const client = clientWith(fetchImpl);
+    fetchImpl.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await expect(client.me()).rejects.toBeInstanceOf(AuthNetworkError);
-    await expect(client.me()).rejects.toMatchObject({ name: "AbortError" });
+
+    const controller = new AbortController();
+    const pending = client.me({ signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("announces a slow request once and does not send it again after the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn<typeof fetch>(
+        (_input, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+              once: true,
+            });
+          }),
+      );
+      const client = clientWith(fetchImpl);
+      let slow = 0;
+      const pending = client.me({
+        onSlow: () => {
+          slow += 1;
+        },
+      });
+      const timedOut = expect(pending).rejects.toThrow(messages.slowTimeout);
+      await vi.advanceTimersByTimeAsync(SLOW_REQUEST_MS);
+      expect(slow).toBe(1);
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - SLOW_REQUEST_MS);
+      await timedOut;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a success body that is not a user", async () => {

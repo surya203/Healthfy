@@ -114,11 +114,14 @@ describe("registration", () => {
     expect(await screen.findByRole("heading", { name: "Welcome, Ada Lovelace" })).toBeInTheDocument();
     expect(screen.getByText(ada.email)).toBeInTheDocument();
     expect(pathName()).toBe("/");
-    expect(client.register).toHaveBeenCalledWith({
-      name: "Ada Lovelace",
-      email: "ada@example.com",
-      password: "  secret1",
-    });
+    expect(client.register).toHaveBeenCalledWith(
+      {
+        name: "Ada Lovelace",
+        email: "ada@example.com",
+        password: "  secret1",
+      },
+      expect.objectContaining({ onSlow: expect.any(Function) }),
+    );
     expect(setItem).not.toHaveBeenCalled();
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
@@ -358,5 +361,72 @@ describe("http adapter wired through the UI", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(messages.invalidCredentials);
     expect(fetchImpl.mock.calls.some((call) => String(call[0]).endsWith("/auth/login"))).toBe(true);
+  });
+});
+
+describe("slow server", () => {
+  it("shows a waking status during hydration without claiming the server started", async () => {
+    let release: (user: typeof ada) => void = () => {};
+    const client = stubClient({
+      me: vi.fn(
+        (options) =>
+          new Promise<typeof ada>((resolve) => {
+            options?.onSlow?.();
+            release = resolve;
+          }),
+      ),
+    });
+    renderApp(client, "/");
+    expect(await screen.findByText(messages.waking)).toBeInTheDocument();
+    expect(screen.getByText("Checking your session…")).toBeInTheDocument();
+    expect(screen.queryByText(/verified/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/started successfully/i)).not.toBeInTheDocument();
+    release(ada);
+    expect(await screen.findByRole("heading", { name: "Welcome, Ada Lovelace" })).toBeInTheDocument();
+    expect(screen.queryByText(messages.waking)).not.toBeInTheDocument();
+  });
+
+  it("lets the user retry a slow login and does not submit it twice", async () => {
+    const user = userEvent.setup();
+    let rejectLogin: (error: unknown) => void = () => {};
+    const login = vi.fn(
+      (_input, options) =>
+        new Promise<never>((_resolve, reject) => {
+          options?.onSlow?.();
+          rejectLogin = reject;
+        }),
+    );
+    const client = stubClient({ login });
+    renderApp(client, "/login");
+    await screen.findByRole("heading", { name: "Sign in" });
+    await user.type(screen.getByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct-horse");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText(messages.waking)).toBeInTheDocument();
+    rejectLogin(new AuthNetworkError(messages.slowTimeout));
+    expect(await screen.findByRole("alert")).toHaveTextContent(messages.slowTimeout);
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(messages.waking)).not.toBeInTheDocument();
+  });
+
+  it("drops a slow hydration update after unmount", async () => {
+    let rejectMe: (error: unknown) => void = () => {};
+    const client = stubClient({
+      me: vi.fn(
+        (options) =>
+          new Promise<typeof ada>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+            rejectMe = reject;
+          }),
+      ),
+    });
+    const view = renderApp(client, "/");
+    expect(await screen.findByText("Checking your session…")).toBeInTheDocument();
+    view.unmount();
+    rejectMe(new DOMException("Aborted", "AbortError"));
+    await waitFor(() => expect(client.me).toHaveBeenCalled());
+    expect(screen.queryByRole("heading", { name: "Session check failed" })).not.toBeInTheDocument();
   });
 });

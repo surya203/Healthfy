@@ -109,7 +109,8 @@ h1 {
   line-height: 1.2;
 }
 
-.lead {
+.lead,
+.status-note {
   margin: 0.4rem 0 0;
   color: var(--muted);
 }

@@ -1,6 +1,6 @@
 import { Page } from "../components/Page";
 
-export function SessionStatus({ label }: { label: string }) {
+export function SessionStatus({ label, detail }: { label: string; detail?: string | null }) {
   return (
     <Page title="Healthify">
       <h1 id="page-title" tabIndex={-1}>
@@ -9,6 +9,11 @@ export function SessionStatus({ label }: { label: string }) {
       <p className="lead" role="status" aria-live="polite">
         {label}
       </p>
+      {detail ? (
+        <p className="status-note" role="status">
+          {detail}
+        </p>
+      ) : null}
     </Page>
   );
 }

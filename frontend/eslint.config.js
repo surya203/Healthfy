@@ -23,7 +23,10 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/test/**/*.{ts,tsx}", "**/*.test.{ts,tsx}"],
+    files: ["src/test/**/*.{ts,tsx}", "**/*.test.{ts,tsx}", "api/**/*.ts"],
+    languageOptions: {
+      globals: globals.node,
+    },
     rules: {
       "react-refresh/only-export-components": "off",
     },

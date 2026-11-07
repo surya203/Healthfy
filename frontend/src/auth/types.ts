@@ -18,6 +18,7 @@ export type LoginBody = {
 
 export type RequestOptions = {
   signal?: AbortSignal;
+  onSlow?: () => void;
 };
 
 export type FieldIssue = {

@@ -25,8 +25,10 @@ function RouteAnnouncer() {
 }
 
 function ProtectedRoute() {
-  const { status, user, hydrationError, refresh } = useAuth();
-  if (status === "loading") return <SessionStatus label="Checking your session…" />;
+  const { status, user, hydrationError, refresh, slow } = useAuth();
+  if (status === "loading") {
+    return <SessionStatus label="Checking your session…" detail={slow ? "The server may be waking up. This can take about a minute." : null} />;
+  }
   if (status === "error") {
     return <SessionProblem message={hydrationError ?? "Unable to check your session."} onRetry={() => void refresh()} />;
   }
@@ -35,8 +37,10 @@ function ProtectedRoute() {
 }
 
 function GuestRoute({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
-  if (status === "loading") return <SessionStatus label="Checking your session…" />;
+  const { status, slow } = useAuth();
+  if (status === "loading") {
+    return <SessionStatus label="Checking your session…" detail={slow ? "The server may be waking up. This can take about a minute." : null} />;
+  }
   if (status === "authenticated") return <Navigate to="/" replace />;
   return children;
 }

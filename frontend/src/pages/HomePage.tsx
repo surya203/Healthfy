@@ -7,7 +7,7 @@ import { presentAuthError } from "../auth/presentError";
 import { Page } from "../components/Page";
 
 export function HomePage() {
-  const { user, logout } = useAuth();
+  const { user, logout, slow } = useAuth();
   const [pending, setPending] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -32,6 +32,11 @@ export function HomePage() {
         Welcome, {user.name}
       </h1>
       <p className="lead">You're signed in.</p>
+      {pending && slow ? (
+        <p className="status-note" role="status">
+          {messages.waking}
+        </p>
+      ) : null}
       {banner ? (
         <p className="banner" role="alert">
           {banner}

@@ -25,6 +25,7 @@ type AuthFormProps = {
   pendingLabel: string;
   focusTarget: string | null;
   focusToken: number;
+  slow?: boolean;
   onChange: (name: string, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   footer: ReactNode;
@@ -43,6 +44,7 @@ export function AuthForm({
   pendingLabel,
   focusTarget,
   focusToken,
+  slow = false,
   onChange,
   onSubmit,
   footer,
@@ -67,6 +69,11 @@ export function AuthForm({
       <p className="lead">{lead}</p>
       <form method="post" noValidate aria-busy={pending || undefined} onSubmit={onSubmit}>
         <FormStatus>{pending ? pendingMessage : ""}</FormStatus>
+        {slow ? (
+          <p className="status-note" role="status">
+            The server may be waking up. This can take about a minute.
+          </p>
+        ) : null}
         {banner ? (
           <div id="form-error" ref={bannerRef} tabIndex={-1} className="banner" role="alert">
             {banner}

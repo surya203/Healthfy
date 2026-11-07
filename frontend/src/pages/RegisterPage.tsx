@@ -6,7 +6,7 @@ import { AuthForm } from "../components/AuthForm";
 import { Page } from "../components/Page";
 
 export function RegisterPage() {
-  const { register, hydrationError } = useAuth();
+  const { register, hydrationError, slow } = useAuth();
   const form = useAuthForm(
     { name: "", email: "", password: "", confirmPassword: "" },
     validateRegistration,
@@ -68,6 +68,7 @@ export function RegisterPage() {
         pendingLabel="Creating account…"
         focusTarget={form.focusTarget}
         focusToken={form.focusToken}
+        slow={slow}
         onChange={(name, value) => form.onChange(name, value)}
         onSubmit={form.onSubmit}
         footer={
